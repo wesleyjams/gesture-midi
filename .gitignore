@@ -1,0 +1,8 @@
+env/
+__pycache__/
+.DS_Store
+
+# Recordings and trained models are large and personal to your laptop and room
+data/
+*.joblib
+archive/v1/gesture_data/
