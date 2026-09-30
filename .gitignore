@@ -6,3 +6,7 @@ __pycache__/
 data/
 *.joblib
 archive/v1/gesture_data/
+
+# Local only, not on GitHub
+archive/
+practice/
