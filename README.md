@@ -69,8 +69,6 @@ Key presses and trackpad clicks are sounds too. So the instrument learns them as
 | `play.py` | Step 3: play, or map gestures in Ableton |
 | `data/` | Your recordings (created by `record.py`) |
 | `model.joblib` | Your trained model (created by `train.py`) |
-| `archive/v1/` | The earlier version of this project, kept for reference |
-| `practice/` | Small practice scripts |
 
 ---
 
@@ -99,7 +97,7 @@ Keep **"Not a Gesture"**: you'll record accidental bumps and noises for it, so t
 
 ---
 
-## 4. Step 1: Record
+## Step 1: Record
 
 ```bash
 python record.py
@@ -122,7 +120,7 @@ Record **at least 3 sessions**, ideally on different days.
 
 ---
 
-## 5. Step 2: Train
+## Step 2: Train
 
 ```bash
 python train.py
@@ -145,7 +143,7 @@ Rows are what you really did, columns are what the model guessed. Numbers off th
 
 ---
 
-## 6. Step 3: Play in Ableton
+## Step 3: Play in Ableton
 
 **Connect Ableton (once):**
 1. Run `python play.py`. The port is created while the script runs.
@@ -171,7 +169,7 @@ Clap              96% sure    23.4 dB
 
 ---
 
-## 7. Recording a good dataset
+## Recording a good dataset
 
 The model learns whatever your examples have in common, including things you didn't mean to teach it.
 
@@ -186,7 +184,7 @@ The model learns whatever your examples have in common, including things you did
 
 ---
 
-## 8. Tuning
+## Tuning
 
 All settings are at the top of `gesture_tools.py`.
 
@@ -202,7 +200,7 @@ After changing anything under **Clips** or **FEATURES**, run `python train.py` a
 
 ---
 
-## 9. Troubleshooting
+## Troubleshooting
 
 | Problem | Fix |
 |---|---|
