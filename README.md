@@ -1,8 +1,8 @@
 # Gesture MIDI
 
-Turn your laptop into a MIDI instrument for Ableton. Tap, clap or wave your hand over the laptop, and it sends MIDI notes and controller messages that you can map to anything in Ableton.
+Turn your laptop into a MIDI instrument for Ableton. Tap or clap on the laptop, and it sends MIDI notes that you map to controls in Ableton: launch clips, mute tracks, switch effects on and off.
 
-No extra hardware: it uses the laptop's own microphone and speakers.
+No extra hardware: it uses the laptop's own microphone.
 
 **Contents**
 1. [How it works](#1-how-it-works)
@@ -19,38 +19,26 @@ No extra hardware: it uses the laptop's own microphone and speakers.
 
 ## 1. How it works
 
-### Two kinds of gestures
-
-- **Acoustic gestures make a sound**: a tap, a clap, a knuckle knock on the laptop. The microphone hears them directly.
-- **Ultrasound gestures are silent hand movements**: covering the laptop, swiping over it. To sense them, the speakers constantly play a **sweep**, a tone gliding from 18,000 to 22,050 Hz every 0.05 seconds. It's too high for you to hear. Your hand reflects and blocks it, and the microphone picks up the change.
-
 ### When, then what
 
 Recognizing a gesture takes two separate questions:
 
-1. **WHEN did something happen?** The **detector** answers this with simple measurements:
-   - *Acoustic:* the sound suddenly got more than 10 dB louder than the quiet room.
-   - *Ultrasound:* the sweep changed more than 3 dB from how it sounds with no hand nearby.
+1. **WHEN did a sound start?** The **detector** answers this with one simple measurement: the sound suddenly got more than `SOUND_THRESHOLD` dB louder than the quiet room.
 2. **WHAT was it?** A machine-learning model, an **SVM** (Support Vector Machine), answers this. It looks at a short clip starting at that moment and compares it with the examples you recorded.
 
 The **same detector** splits your recordings into examples *and* listens live. So the clips the model learns from are cut in exactly the same way as the clips it sees while you play. That's the most important design choice in this project.
 
 ```
- microphone ──▶ detector: "something started at sample 48,000"
+ microphone ──▶ detector: "a sound started at sample 48,000"
                    │
-                   ├──▶ instant HIT note (acoustic only, ~1 ms)
+                   ├──▶ instant HIT note (if turned on)
                    │
-                   └──▶ wait for the clip ──▶ features ──▶ SVM: "Nail Tap" ──▶ MIDI note 38
-                        (0.1 s acoustic,
-                         0.4 s ultrasound)
+                   └──▶ wait 0.1 s for the clip ──▶ features ──▶ SVM: "Clap" ──▶ MIDI note 36
 ```
 
 ### From sound to numbers (features)
 
-An SVM can't read audio directly; it needs a short, fixed list of numbers. `get_features()` makes that list:
-
-- **Acoustic:** the clip is split into its *attack* (first half) and *decay* (second half). For each half, it measures how loud 20 frequency bands are, from low thumps to bright clicks. That's 40 numbers.
-- **Ultrasound:** the sweep is split into 8 frequency bands. The model gets **how much each band changed** compared with just before the gesture, in 4 time slices. That's 32 numbers. Using the *change* means the speaker volume and where the laptop sits don't matter. The time slices tell a swipe going one way from a swipe going the other.
+An SVM can't read audio directly; it needs a short, fixed list of numbers. `get_features()` makes that list: the clip is split into its *attack* (first half) and *decay* (second half). For each half, it measures how loud 20 frequency bands are, from low thumps to bright clicks. That's 40 numbers.
 
 How loud each band is gets measured with an **FFT** (Fast Fourier Transform), which splits audio into its frequencies.
 
@@ -60,13 +48,14 @@ How loud each band is gets measured with an **FFT** (Fast Fourier Transform), wh
 
 | What | MIDI | When |
 |---|---|---|
-| Hit note | note 60, velocity = how loud | the instant any sound starts (~1 ms) |
-| Acoustic gesture | its own note | 0.1 s after the sound starts |
-| Ultrasound gesture | its own note, or a "hold" | 0.4 s after the hand arrives |
-| Hold (e.g. Covered) | CC → 127, back to 0 when your hand leaves | while the gesture lasts |
-| Hand controller | CC 20, value 0–127 | continuously: how much your hand changes the sweep |
+| Gesture | its own note, velocity = how loud | 0.1 s after the sound starts |
+| Hit note (off by default) | e.g. note 60, velocity = how loud | the instant any sound starts (~1 ms) |
 
-The hit note exists because 0.1 s is noticeable in rhythm. Use the hit note for drums that must be tight, and the gesture notes for switching, launching and effects.
+The hit note exists because 0.1 s is noticeable in rhythm. It is **off by default**: it fires before the sound is classified, so every key press and trackpad click would trigger it too. Turn it on (`HIT_NOTE = 60`) only if you won't touch the keyboard while playing.
+
+### Playing Ableton's keyboard at the same time
+
+Key presses and trackpad clicks are sounds too. So the instrument learns them as two extra gestures, **Key Click** and **Trackpad Click**, which play nothing. When you press a key, the model recognises a key click and ignores it.
 
 ---
 
@@ -74,12 +63,12 @@ The hit note exists because 0.1 s is noticeable in rhythm. Use the hit note for 
 
 | File | What it does |
 |---|---|
-| `gesture_tools.py` | The toolbox everything else uses: **settings**, **your gestures and their MIDI**, sound measurement, the detector, features |
+| `gesture_tools.py` | The toolbox everything else uses: **settings**, **your gestures and their notes**, sound measurement, the detector, features |
 | `record.py` | Step 1: record examples of each gesture |
-| `train.py` | Step 2: train the models and see how accurate they are |
+| `train.py` | Step 2: train the model and see how accurate it is |
 | `play.py` | Step 3: play, or map gestures in Ableton |
 | `data/` | Your recordings (created by `record.py`) |
-| `models.joblib` | Your trained models (created by `train.py`) |
+| `model.joblib` | Your trained model (created by `train.py`) |
 | `archive/v1/` | The earlier version of this project, kept for reference |
 | `practice/` | Small practice scripts |
 
@@ -97,17 +86,16 @@ pip install -r requirements.txt
 
 Every new terminal: `source env/bin/activate`.
 
-**Audio devices:** run `python -m sounddevice` to list them. Set `INPUT_DEVICE` (the microphone) and `OUTPUT_DEVICE` (the speakers) at the top of `gesture_tools.py`. Use the **built-in** mic and speakers; most headphones and Bluetooth devices can't play ultrasound.
+**Microphone:** run `python -m sounddevice` to list your devices, and set `INPUT_DEVICE` at the top of `gesture_tools.py` to the built-in microphone's number. The numbers change when you plug something in (like headphones), so check again if you get a device error.
 
 **Ableton's own sound** should go to **headphones or an audio interface**, not the laptop speakers. Otherwise the microphone hears your music and mistakes it for gestures.
 
 **Choose your gestures:** edit the `GESTURES` list in `gesture_tools.py`. One line per gesture:
 ```python
-("Nail Tap",  "acoustic",   ("note", 38)),   # plays note 38
-("Covered",   "ultrasound", ("hold", 21)),   # CC 21 = 127 while covered, 0 when you let go
-("Not a Gesture", "acoustic", None),         # sends nothing
+("Clap", 36),              # plays note 36
+("Not a Gesture", None),   # plays nothing
 ```
-Keep one **"Not a Gesture"** per mode. You'll record accidental bumps and movements for it, so the instrument learns to ignore them.
+Keep **"Not a Gesture"**: you'll record accidental bumps and noises for it, so the instrument learns to ignore them. Keep **"Key Click"** and **"Trackpad Click"** too if you'll use the keyboard while playing.
 
 ---
 
@@ -117,7 +105,7 @@ Keep one **"Not a Gesture"** per mode. You'll record accidental bumps and moveme
 python record.py
 ```
 
-1. **Calibration:** keep your hands away and stay quiet for 2 seconds. The script measures the room and the resting sweep, and prints something like `room level -55 dB, sweep wobble 0.4 dB`.
+1. **Calibration:** stay quiet for 2 seconds. The script measures the room and prints something like `room level -67 dB`.
 2. For each gesture:
    - press **Enter** to start
    - do the gesture about **20 times, with a short pause between each**
@@ -126,7 +114,9 @@ python record.py
 
 The first and last 0.3 s of each recording are ignored, because that's where the Enter-key clicks are.
 
-For **"Not a Gesture"**, do things you *don't* want to trigger anything: touch the table, shift the laptop, reach for the trackpad, move your hand around nearby.
+For **"Not a Gesture"**, make the noises you *don't* want to trigger anything: touch the table, shift the laptop, move in your chair.
+
+For **"Key Click"**, type into the terminal the way you play Ableton's keyboard: single keys and chords, soft and hard, with short pauses. What you type is ignored; press **Enter** when done. For **"Trackpad Click"**, click and tap the trackpad. Record both every session.
 
 Record **at least 3 sessions**, ideally on different days.
 
@@ -138,7 +128,7 @@ Record **at least 3 sessions**, ideally on different days.
 python train.py
 ```
 
-For each mode it prints:
+It prints:
 ```
 120 examples of 4 gestures from 3 session(s)
 Tested on session 20260929-143000: 87% correct (guessing would get 25%)
@@ -147,9 +137,9 @@ To keep the test honest, the model is trained **without your newest session** an
 
 **The confusion matrix** shows which gestures get mixed up:
 ```
-                 Clap Knuckle Nail  Not
+                 Clap Finger Palm  Not
   Clap             19    0     1     0     ← 19 of 20 claps correct
-  Knuckle Tap       0   14     0     6     ← knuckle taps often taken for "Not a Gesture"
+  Finger Tap        0   14     0     6     ← finger taps often taken for "Not a Gesture"
 ```
 Rows are what you really did, columns are what the model guessed. Numbers off the diagonal tell you which gestures need more careful recording, or are too similar to tell apart.
 
@@ -159,17 +149,25 @@ Rows are what you really did, columns are what the model guessed. Numbers off th
 
 **Connect Ableton (once):**
 1. Run `python play.py`. The port is created while the script runs.
-2. In Ableton: **Settings → Link, Tempo & MIDI**. Find **Laptop Gestures** under *Input* and turn on **Track** (notes play instruments) and **Remote** (notes and CCs can control knobs and buttons).
+2. In Ableton: **Settings → Link, Tempo & MIDI**. Find **Laptop Gestures** under *Input*:
+   - **Remote on**: the notes control whatever you map them to.
+   - **Track off**: the notes never reach an instrument, so gestures make no sound, even while a track is armed for Ableton's computer keyboard.
 
 **Map gestures to controls:** choose mode **2** (mapping):
 1. In Ableton press **Cmd+M** (MIDI Map Mode).
-2. Click the control you want: a knob, a clip, a mute button.
-3. In the terminal, type the gesture's number to send its message. It's now mapped.
+2. Click the control you want: a clip, a mute button, a device on/off.
+3. In the terminal, type the gesture's number to send its note. It's now mapped.
 4. Repeat, then press **Cmd+M** again to leave.
 
-For notes to play an instrument (e.g. a Drum Rack), arm the track instead. Its pads respond to the gestures' note numbers.
+A mapped note works like pressing the button: each hit toggles it on or off, or launches the clip.
 
-**Play:** run `python play.py` and choose **1**. After calibrating, it prints every gesture it recognizes and sends the MIDI.
+Want a gesture to play an instrument instead (e.g. a Drum Rack)? Turn **Track** on and arm that track. Its pads respond to the gestures' note numbers.
+
+**Play:** run `python play.py` and choose **1**. After calibrating, it prints every sound it recognizes:
+```
+Clap              96% sure    23.4 dB
+```
+`% sure` is how confident the model is. `dB` is how far the sound rose above the quiet room. Both help with tuning: sounds you didn't mean to make that are only just above `SOUND_THRESHOLD` tell you to raise it.
 
 ---
 
@@ -177,11 +175,12 @@ For notes to play an instrument (e.g. a Drum Rack), arm the track instead. Its p
 
 The model learns whatever your examples have in common, including things you didn't mean to teach it.
 
-- **Record in the conditions you'll play in:** same laptop position, same speaker volume, Ableton running.
-- **Keep the speaker volume the same** every session. The sweep's level is part of what the ultrasound model hears.
-- **Vary what shouldn't matter:** soft and hard hits, fast and slow swipes, slightly different spots.
-- **Pause between repetitions** (about 1 s for sounds, 1.5–2 s for hand gestures). The detector needs a clear gap to separate them.
-- **Choose gestures that sound different.** Two taps in the same place with the same finger will get confused. A clap, a nail tap and a knuckle knock are easy to tell apart.
+- **Record in the conditions you'll play in:** same laptop position, same room, Ableton running.
+- **Vary what shouldn't matter:** soft and hard hits, slightly different spots.
+- **Pause between repetitions**, at least `SOUND_COOLDOWN` (1 s). The detector needs a clear gap to separate them.
+- **Choose gestures that sound different.** Two taps in the same place with the same finger will get confused. A clap, a palm tap and a finger tap are easy to tell apart.
+
+**Removing a gesture:** delete its line from `GESTURES` and run `python train.py`. Its recordings stay in `data/` but are skipped.
 - **Keep numbers balanced:** about the same number of examples for each gesture.
 - **Check the count** after each recording. If it found far more or fewer than you did, press **r**.
 
@@ -193,12 +192,11 @@ All settings are at the top of `gesture_tools.py`.
 
 | Setting | Default | Change it when… |
 |---|---|---|
-| `ACOUSTIC_THRESHOLD` | 10 dB | Soft taps are missed → lower. Random noises trigger → raise |
-| `ULTRASOUND_THRESHOLD` | 3 dB | Hand gestures are missed → lower (stay well above the "sweep wobble" from calibration). False hand triggers → raise |
-| `ACOUSTIC_AFTER` | 0.1 s | Shorter = faster response, possibly less accurate. **Retrain** after changing |
-| `CONTROLLER_RANGE` | 10 dB | The hand controller never reaches 127 → lower. It maxes out too easily → raise |
+| `SOUND_THRESHOLD` | 20 dB | Soft taps are missed → lower. Random noises trigger → raise |
+| `SOUND_COOLDOWN` | 1.0 s | You want to play faster → lower. One hit counts twice → raise |
+| `CLIP_AFTER` | 0.1 s | Shorter = faster response, possibly less accurate. **Retrain** after changing |
 | `VELOCITY_RANGE` | 30 dB | Hits are always loud → raise. Always soft → lower |
-| `HIT_NOTE`, `CONTROLLER_CC` | 60, 20 | Set to `None` to turn them off |
+| `HIT_NOTE` | None | Set to a note (e.g. 60) for an instant note on every sound. Key clicks will trigger it too |
 
 After changing anything under **Clips** or **FEATURES**, run `python train.py` again. The detector settings take effect straight away. If you change them a lot, re-record, so your examples are split the same way the detector now works.
 
@@ -209,9 +207,8 @@ After changing anything under **Clips** or **FEATURES**, run `python train.py` a
 | Problem | Fix |
 |---|---|
 | `ModuleNotFoundError` | `source env/bin/activate` |
-| Stream / device error | Check `INPUT_DEVICE` and `OUTPUT_DEVICE` with `python -m sounddevice`; use the built-in mic and speakers |
-| "WARNING: the sweep is unsteady" | Keep your hands away during calibration; check the laptop volume isn't muted |
-| `Found 0` for a hand gesture | Lower `ULTRASOUND_THRESHOLD`; move your hand closer to the speakers |
+| `Invalid number of channels` or another device error | The device numbers changed (e.g. you plugged in headphones). Run `python -m sounddevice` and update `INPUT_DEVICE` |
 | Laptop Gestures not in Ableton | `play.py` must be running; restart Ableton's MIDI settings page |
+| Lots of triggers while you're quiet | Raise `SOUND_THRESHOLD`; record the room's noises as "Not a Gesture" |
 | Music triggers gestures | Send Ableton's audio to headphones or an interface, not the laptop speakers |
 | Good test score, poor live playing | Record a session in the exact setup you play in |

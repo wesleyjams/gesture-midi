@@ -1,14 +1,12 @@
 '''
-Step 2: train the models.
+Step 2: train the model.
 
-Reads data/manifest.csv, cuts a clip at every gesture found by record.py,
-turns each clip into features, and trains one SVM per mode:
-  acoustic   (sounds: taps, claps...)
-  ultrasound (silent hand movements: swipes, covers...)
+Reads data/manifest.csv, cuts a clip at every sound found by record.py,
+turns each clip into features, and trains an SVM to tell the gestures apart.
 
-To test honestly, each model is first trained WITHOUT the newest session and
+To test honestly, the model is first trained WITHOUT the newest session and
 tested on it, like playing on a new day. Then it is retrained on everything
-and saved to models.joblib for play.py.
+and saved to model.joblib for play.py.
 
   python train.py
 '''
@@ -24,26 +22,27 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 
-from gesture_tools import DATA_FOLDER, MODEL_FILE, cut_clip, get_features
+from gesture_tools import DATA_FOLDER, GESTURES, MODEL_FILE, cut_clip, get_features
 
 
-def load_examples(mode):
-    """Return features (X), labels (y) and sessions for every example of this mode."""
+def load_examples():
+    """Return features (X), labels (y) and sessions for every example of a gesture in GESTURES."""
     X = []
     y = []
     sessions = []
     recordings = {} # file name -> audio, so each WAV is only read once
+    labels = [label for label, note in GESTURES]
 
     with open(os.path.join(DATA_FOLDER, "manifest.csv"), newline="") as file:
         for row in csv.DictReader(file):
-            if row["mode"] != mode:
-                continue
+            if row["label"] not in labels:
+                continue # a gesture you removed from GESTURES
             if row["file"] not in recordings:
                 sample_rate, audio = wavfile.read(os.path.join(DATA_FOLDER, row["file"]))
                 recordings[row["file"]] = audio
 
-            clip = cut_clip(recordings[row["file"]], int(row["onset"]), mode)
-            X.append(get_features(clip, mode))
+            clip = cut_clip(recordings[row["file"]], int(row["onset"]))
+            X.append(get_features(clip))
             y.append(row["label"])
             sessions.append(row["session"])
 
@@ -55,8 +54,10 @@ def make_model():
     A pipeline runs its steps in order and can be saved as one object:
       1. StandardScaler puts every feature on the same scale
       2. SVC is the Support Vector Machine that learns to tell gestures apart
+         (probability=True lets play.py show how sure the model is)
     """
-    return make_pipeline(StandardScaler(), SVC(kernel="rbf", C=10, class_weight="balanced"))
+    svm = SVC(kernel="rbf", C=10, class_weight="balanced", probability=True)
+    return make_pipeline(StandardScaler(), svm)
 
 
 def test_model(X, y, sessions):
@@ -83,24 +84,19 @@ def test_model(X, y, sessions):
 
 
 def main():
-    models = {}
-    for mode in ["acoustic", "ultrasound"]:
-        print(f"\n========== {mode} ==========")
-        X, y, sessions = load_examples(mode)
-        if len(set(y)) < 2:
-            print("Need examples of at least 2 gestures, skipping.")
-            continue
-        print(f"{len(y)} examples of {len(set(y))} gestures from {len(set(sessions))} session(s)")
+    X, y, sessions = load_examples()
+    if len(set(y)) < 2:
+        print("Need examples of at least 2 gestures. Record some first: python record.py")
+        return
+    print(f"{len(y)} examples of {len(set(y))} gestures from {len(set(sessions))} session(s)")
 
-        test_model(X, y, sessions)
+    test_model(X, y, sessions)
 
-        # The final model learns from every example
-        final_model = make_model()
-        final_model.fit(X, y)
-        models[mode] = final_model
-
-    joblib.dump(models, MODEL_FILE)
-    print(f"\nSaved {' and '.join(models)} models to {MODEL_FILE}. Next step: python play.py")
+    # The final model learns from every example
+    model = make_model()
+    model.fit(X, y)
+    joblib.dump(model, MODEL_FILE)
+    print(f"\nSaved the model to {MODEL_FILE}. Next step: python play.py")
 
 
 if __name__ == "__main__":
